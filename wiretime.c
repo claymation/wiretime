@@ -474,10 +474,8 @@ int main(int argc, char *argv[])
 		if (trace_marker)
 			fputs("starting slack time\n", trace_marker);
 
-		do {
-			synchronize(period, addend, recv_timestamp, sockfd);
-		} while (num_packets && !(tstamps[0].tv_sec && tstamps[1].tv_sec && tstamps[2].tv_sec));
-		
+		synchronize(period, addend, recv_timestamp, sockfd);
+
 		if (trace_marker)
 			fputs("starting cycle\n", trace_marker);
 
@@ -493,7 +491,9 @@ int main(int argc, char *argv[])
 		
 		if (num_packets)
 		{
-			if (!(tstamps[0].tv_sec && tstamps[1].tv_sec && tstamps[2].tv_sec))
+			if (!(tstamps[0].tv_sec &&
+			      tstamps[1].tv_sec &&
+			      tstamps[2].tv_sec))
 			{
 				if (!tstamps[0].tv_sec)
 					fputs("MISSING TIMESTAMP 0\n", stderr);
