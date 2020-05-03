@@ -507,6 +507,10 @@ int main(int argc, char *argv[])
 				((tstamps[2].tv_sec - tstamps[0].tv_sec) * 1000000000LL +
 				 (tstamps[2].tv_nsec - tstamps[0].tv_nsec)) / 1000;
 
+			if (trace_marker)
+				fprintf(trace_marker, "%6ld us latency\n",
+						latency);
+
 			bool snapshotted = false;
 
 			if (snapshot && threshold && latency > threshold)
