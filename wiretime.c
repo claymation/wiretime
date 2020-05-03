@@ -234,9 +234,6 @@ void synchronize(long period, long addend, void (*exceptfn)(int), int sockfd)
 	long error;
 	int fds;
 
-	/*
-	 * Get current time.
-	 */
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
 	/*
@@ -309,6 +306,7 @@ void synchronize(long period, long addend, void (*exceptfn)(int), int sockfd)
 		fprintf(stderr, " error: %17.9f\n", error / 1E9);
 #endif
 	} while (error < -50000);
+
 #if DEBUG_TIME_SYNC
 	fprintf(stderr, "\n");
 #endif
@@ -518,14 +516,14 @@ int main(int argc, char *argv[])
 			}
 
 			fprintf(stderr, "seq: %05u, "
-					"socket: %6ld.%09ld, "
-					"driver: %6ld.%09ld, "
-					"hw: %6ld.%09ld, "
-					"latency: %6ld us %s\n",
+					"socket: %5ld.%06ld, "
+					"driver: %5ld.%06ld, "
+					"hw: %5ld.%06ld, "
+					"latency: %5ld us %s\n",
 					seqid,
-					tstamps[0].tv_sec, tstamps[0].tv_nsec,
-					tstamps[1].tv_sec, tstamps[1].tv_nsec,
-					tstamps[2].tv_sec, tstamps[2].tv_nsec,
+					tstamps[0].tv_sec, tstamps[0].tv_nsec / 1000,
+					tstamps[1].tv_sec, tstamps[1].tv_nsec / 1000,
+					tstamps[2].tv_sec, tstamps[2].tv_nsec / 1000,
 					latency,
 					snapshotted ? "(SNAPSHOT TAKEN)" : "");
 
