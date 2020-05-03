@@ -458,6 +458,13 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
+	err = sigaction(SIGTERM, &act, NULL);
+	if (err < 0)
+	{
+		perror("sigaction(SIGINT)");
+		exit(EXIT_FAILURE);
+	}
+
 	atexit(print_statistics);
 
 	while (1)
