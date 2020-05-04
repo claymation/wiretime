@@ -43,7 +43,7 @@
 #include <linux/pkt_sched.h>
 #include <linux/sockios.h>
 
-static FILE *snapshot;
+static int snapshot = -1;
 static FILE *trace_marker;
 
 static size_t num_packets;
@@ -349,15 +349,13 @@ int main(int argc, char *argv[])
 	/*
 	 * Set up kernel tracing.
 	 */
-	snapshot = fopen("/sys/kernel/tracing/snapshot", "w");
-	if (snapshot)
-		setbuf(snapshot, NULL);
+	snapshot = open("/sys/kernel/tracing/snapshot", O_WRONLY);
 
 	trace_marker = fopen("/sys/kernel/tracing/trace_marker", "w");
 	if (trace_marker)
 		setbuf(trace_marker, NULL);
 
-	if (!snapshot || !trace_marker)
+	if (snapshot < 0 || !trace_marker)
 		fputs("can't take snapshot: no /sys/kernel/tracing?\n", stderr);
 
 	const int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -506,13 +504,6 @@ int main(int argc, char *argv[])
 					fputs("MISSING TIMESTAMP 1\n", stderr);
 				if (!tstamps[2].tv_sec)
 					fputs("MISSING TIMESTAMP 2\n", stderr);
-#if 0
-				if (snapshot)
-				{
-					fputs("1\n", snapshot);
-					fputs("SNAPSHOT TAKEN!\n", stderr);
-				}
-#endif
 
 				continue;
 			}
@@ -527,9 +518,9 @@ int main(int argc, char *argv[])
 
 			bool snapshotted = false;
 
-			if (snapshot && threshold && latency > threshold)
+			if (snapshot >= 0 && threshold && latency > threshold)
 			{
-				fputs("1\n", snapshot);
+				write(snapshot, "1", 1);
 				snapshotted = true;
 			}
 
@@ -539,9 +530,12 @@ int main(int argc, char *argv[])
 					"hw: %5ld.%06ld, "
 					"latency: %5ld us %s\n",
 					seqid,
-					tstamps[0].tv_sec, tstamps[0].tv_nsec / 1000,
-					tstamps[1].tv_sec, tstamps[1].tv_nsec / 1000,
-					tstamps[2].tv_sec, tstamps[2].tv_nsec / 1000,
+					tstamps[0].tv_sec,
+					tstamps[0].tv_nsec / 1000,
+					tstamps[1].tv_sec,
+					tstamps[1].tv_nsec / 1000,
+					tstamps[2].tv_sec,
+					tstamps[2].tv_nsec / 1000,
 					latency,
 					snapshotted ? "(SNAPSHOT TAKEN)" : "");
 
