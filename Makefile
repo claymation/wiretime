@@ -1,8 +1,8 @@
 CC	:= $(CROSS_COMPILE)$(CC)
-CFLAGS	?= -Wall -Wextra -O3
+CFLAGS	?= -Wall -Wextra -O0
 INSTALL ?= install
 
-BINS	= wiretime
+BINS	= wiretime spin
 
 .PHONY: all
 all: $(BINS)

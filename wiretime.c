@@ -501,11 +501,13 @@ int main(int argc, char *argv[])
 					fputs("MISSING TIMESTAMP 1\n", stderr);
 				if (!tstamps[2].tv_sec)
 					fputs("MISSING TIMESTAMP 2\n", stderr);
+#if 0
 				if (snapshot)
 				{
 					fputs("1\n", snapshot);
 					fputs("SNAPSHOT TAKEN!\n", stderr);
 				}
+#endif
 
 				continue;
 			}
