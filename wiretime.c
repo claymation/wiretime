@@ -261,9 +261,9 @@ void recv_timestamp(int sockfd)
 	if (trace_marker)
 		fprintf(trace_marker, "%6ld us latency\n", latency);
 
-	bool snapshotted = false;
+	static bool snapshotted = false;
 
-	if (snapshot >= 0 && threshold && latency > threshold)
+	if (snapshot >= 0 && !snapshotted && threshold && latency > threshold)
 	{
 		write(snapshot, "1", 1);
 		snapshotted = true;
