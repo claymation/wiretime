@@ -350,7 +350,12 @@ int main(int argc, char *argv[])
 	 * Set up kernel tracing.
 	 */
 	snapshot = fopen("/sys/kernel/tracing/snapshot", "w");
+	if (snapshot)
+		setbuf(snapshot, NULL);
+
 	trace_marker = fopen("/sys/kernel/tracing/trace_marker", "w");
+	if (trace_marker)
+		setbuf(trace_marker, NULL);
 
 	if (!snapshot || !trace_marker)
 		fputs("can't take snapshot: no /sys/kernel/tracing?\n", stderr);
