@@ -45,6 +45,7 @@
 
 static int snapshot = -1;
 static FILE *trace_marker;
+long threshold;
 
 static size_t num_packets;
 
@@ -57,8 +58,6 @@ static long samples[NSAMPLES];
 #define NBINS		12U
 #define BIN0		32L
 static size_t bins[NBINS];
-
-static struct timespec tstamps[3];
 
 void sigint_handler(int __attribute__((unused))_)
 {
@@ -76,13 +75,6 @@ int compar(const void *p, const void *q)
 
 void print_statistics()
 {
-	/*
-	 * We don't update statistics for the first packet, because there's
-	 * typically some additional latency for the first packet.
-	 */
-	if (num_packets)
-		--num_packets;
-
 	printf("%zu packets transmitted\n", num_packets);
 
 	if (!num_packets)
@@ -110,6 +102,8 @@ void print_statistics()
 
 void update_statistics(long latency)
 {
+	++num_packets;
+
 	if (latency < min_lat)
 		min_lat = latency;
 
@@ -127,6 +121,15 @@ void update_statistics(long latency)
 	}
 	++bins[NBINS - 1];
 };
+
+#define ARRAY_SIZE(A)	(sizeof(A) / sizeof(A[0]))
+
+struct recv_ts {
+	unsigned seq;
+	struct timespec ts[3];
+};
+
+static struct recv_ts recv_ts[64];
 
 void recv_timestamp(int sockfd)
 {
@@ -147,7 +150,7 @@ void recv_timestamp(int sockfd)
 		return;
 	}
 
-	struct scm_timestamping *tstamps_local = NULL;
+	struct scm_timestamping *tstamps = NULL;
 	struct sock_extended_err *serr = NULL;
 	struct cmsghdr *cmsg;
 
@@ -163,13 +166,13 @@ void recv_timestamp(int sockfd)
 		if (cmsg->cmsg_level == SOL_SOCKET &&
 			cmsg->cmsg_type == SCM_TIMESTAMPING)
 		{
-			tstamps_local = (struct scm_timestamping *)CMSG_DATA(cmsg);
+			tstamps = (struct scm_timestamping *)CMSG_DATA(cmsg);
 #if defined(DEBUG_TIME_STAMP)
 			for (int i = 0; i < 3; i++)
 			{
 				fprintf(stderr, "  ts %d: %7ld.%09ld\n", i,
-					tstamps_local->ts[i].tv_sec,
-					tstamps_local->ts[i].tv_nsec);
+					tstamps->ts[i].tv_sec,
+					tstamps->ts[i].tv_nsec);
 			}
 #endif
 		}
@@ -186,30 +189,104 @@ void recv_timestamp(int sockfd)
 		}
 	}
 
-	if (!(tstamps_local && serr))
+	if (!(tstamps && serr))
 		return;
+
+	unsigned seq = serr->ee_data;
+	size_t idx = seq % ARRAY_SIZE(recv_ts);
 
 	if (serr->ee_info == SCM_TSTAMP_SCHED)
 	{
 		/*
 		 * software timestamp: packet entered the packet scheduler.
 		 */
-		tstamps[0] = tstamps_local->ts[0];
+		if (recv_ts[idx].ts[0].tv_sec) {
+			fprintf(stderr, "missed timestamp(s) for seq %u\n",
+					recv_ts[idx].seq);
+			memset(&recv_ts[idx], 0, sizeof(recv_ts[0]));
+		}
+		if (!recv_ts[idx].seq || recv_ts[idx].seq == seq) {
+			recv_ts[idx].ts[0] = tstamps->ts[0];
+			recv_ts[idx].seq = seq;
+		} else
+			fprintf(stderr, "dropped stale timestamp 0 for seq %u\n",
+					seq);
 	}
-	else if (serr->ee_info == SCM_TSTAMP_SND && tstamps_local->ts[0].tv_sec)
+	else if (serr->ee_info == SCM_TSTAMP_SND && tstamps->ts[0].tv_sec)
 	{
 		/*
 		 * software timestamp: packet passed to NIC.
 		 */
-		tstamps[1] = tstamps_local->ts[0];
+		if (recv_ts[idx].ts[1].tv_sec) {
+			fprintf(stderr, "missed timestamp(s) for seq %u\n",
+					recv_ts[idx].seq);
+			memset(&recv_ts[idx], 0, sizeof(recv_ts[0]));
+		}
+		if (!recv_ts[idx].seq || recv_ts[idx].seq == seq) {
+			recv_ts[idx].ts[1] = tstamps->ts[0];
+			recv_ts[idx].seq = seq;
+		} else
+			fprintf(stderr, "dropped stale timestamp 1 for seq %u\n",
+					seq);
 	}
-	else if (serr->ee_info == SCM_TSTAMP_SND && tstamps_local->ts[2].tv_sec)
+	else if (serr->ee_info == SCM_TSTAMP_SND && tstamps->ts[2].tv_sec)
 	{
 		/*
 		 * hardware timestamp: packet transmitted by NIC.
 		 */
-		tstamps[2] = tstamps_local->ts[2];
+		if (recv_ts[idx].ts[2].tv_sec) {
+			fprintf(stderr, "missed timestamp(s) for seq %u\n",
+					recv_ts[idx].seq);
+			memset(&recv_ts[idx], 0, sizeof(recv_ts[0]));
+		}
+		if (!recv_ts[idx].seq || recv_ts[idx].seq == seq) {
+			recv_ts[idx].ts[2] = tstamps->ts[2];
+			recv_ts[idx].seq = seq;
+		} else
+			fprintf(stderr, "dropped stale timestamp 2 for seq %u\n",
+					seq);
 	}
+
+	if (!(recv_ts[idx].ts[0].tv_sec &&
+	      recv_ts[idx].ts[1].tv_sec &&
+	      recv_ts[idx].ts[2].tv_sec))
+	{
+		return;
+	}
+
+	long latency =
+		((recv_ts[idx].ts[2].tv_sec - recv_ts[idx].ts[0].tv_sec) * 1000000000LL +
+		 (recv_ts[idx].ts[2].tv_nsec - recv_ts[idx].ts[0].tv_nsec)) / 1000;
+
+	if (trace_marker)
+		fprintf(trace_marker, "%6ld us latency\n", latency);
+
+	bool snapshotted = false;
+
+	if (snapshot >= 0 && threshold && latency > threshold)
+	{
+		write(snapshot, "1", 1);
+		snapshotted = true;
+	}
+
+	fprintf(stderr, "seq: %05u, "
+			"sched: %5ld.%06ld, "
+			"driver: %5ld.%06ld, "
+			"hw: %5ld.%06ld, "
+			"latency: %5ld us %s\n",
+			serr->ee_data,
+			recv_ts[idx].ts[0].tv_sec,
+			recv_ts[idx].ts[0].tv_nsec / 1000,
+			recv_ts[idx].ts[1].tv_sec,
+			recv_ts[idx].ts[1].tv_nsec / 1000,
+			recv_ts[idx].ts[2].tv_sec,
+			recv_ts[idx].ts[2].tv_nsec / 1000,
+			latency,
+			snapshotted ? "(SNAPSHOT TAKEN)" : "");
+
+	update_statistics(latency);
+
+	memset(&recv_ts[idx], 0, sizeof(recv_ts[0]));
 }
 
 #define BILLION		1000000000L
@@ -326,7 +403,8 @@ int main(int argc, char *argv[])
 	const char *interface = argv[1];
 	const long period = atol(argv[2]);
 	const long addend = atol(argv[3]);
-	const long threshold = atol(argv[4]);
+
+	threshold = atol(argv[4]);
 
 	if (period <= 0)
 	{
@@ -492,62 +570,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "short write\n");
 		}
 		
-		if (num_packets)
-		{
-			if (!(tstamps[0].tv_sec &&
-			      tstamps[1].tv_sec &&
-			      tstamps[2].tv_sec))
-			{
-				if (!tstamps[0].tv_sec)
-					fputs("MISSING TIMESTAMP 0\n", stderr);
-				if (!tstamps[1].tv_sec)
-					fputs("MISSING TIMESTAMP 1\n", stderr);
-				if (!tstamps[2].tv_sec)
-					fputs("MISSING TIMESTAMP 2\n", stderr);
-
-				continue;
-			}
-
-			long latency =
-				((tstamps[2].tv_sec - tstamps[0].tv_sec) * 1000000000LL +
-				 (tstamps[2].tv_nsec - tstamps[0].tv_nsec)) / 1000;
-
-			if (trace_marker)
-				fprintf(trace_marker, "%6ld us latency\n",
-						latency);
-
-			bool snapshotted = false;
-
-			if (snapshot >= 0 && threshold && latency > threshold)
-			{
-				write(snapshot, "1", 1);
-				snapshotted = true;
-			}
-
-			fprintf(stderr, "seq: %05u, "
-					"socket: %5ld.%06ld, "
-					"driver: %5ld.%06ld, "
-					"hw: %5ld.%06ld, "
-					"latency: %5ld us %s\n",
-					seqid,
-					tstamps[0].tv_sec,
-					tstamps[0].tv_nsec / 1000,
-					tstamps[1].tv_sec,
-					tstamps[1].tv_nsec / 1000,
-					tstamps[2].tv_sec,
-					tstamps[2].tv_nsec / 1000,
-					latency,
-					snapshotted ? "(SNAPSHOT TAKEN)" : "");
-
-			if (num_packets > 1)
-				update_statistics(latency);
-		}
-
 		++seqid;
-
-		memset(tstamps, 0, sizeof(tstamps));
-
-		++num_packets;
 	}
 
 	close(sockfd);
