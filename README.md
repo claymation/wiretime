@@ -1,5 +1,7 @@
 # wiretime
 
+![Build](https://github.com/claymation/wiretime/workflows/Build/badge.svg)
+
 This program transmits small UDP packets and measures the time it takes
 the packet to traverse the network protocol stack, the queue discipline
 layer, and the driver queue before being emitted on the wire. It relies
